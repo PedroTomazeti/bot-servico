@@ -16,6 +16,7 @@ Este projeto automatiza o processo de análise e registro de notas fiscais de se
 - Exportável como `.exe` para execução sem dependências externas.
 
 ## 📁 Estrutura de Pastas
+```bash
 BOT-SERVICO/
 │<br>
 ├── app/ # Interface gráfica (controle da automação)<br>
@@ -32,7 +33,7 @@ BOT-SERVICO/
 ├── KADRIX S.spec # Configuração do PyInstaller<br>
 ├── README.md # Este arquivo<br>
 ├── requirements.txt # Dependências do projeto<br>
-
+```
 
 ## ⚙️ Tecnologias Utilizadas
 
