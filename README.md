@@ -9,9 +9,11 @@ Este projeto automatiza o processo de análise e registro de notas fiscais de se
 
 - Extração de informações de XMLs.
 - Análise e categorização das notas.
+- Formatação de Ordens de Serviço e número das notas.
+- Seleção do ambiente de produção correto.
 - Busca automática de arquivos em pastas padronizadas.
 - Interação com sistema TOTVS para preenchimento automatizado.
-- Banco de dados local para controle e rastreabilidade.
+- Banco de dados baseado em SQLite para controle e rastreabilidade.
 - Interface gráfica simples para controle da automação.
 - Exportável como `.exe` para execução sem dependências externas.
 
