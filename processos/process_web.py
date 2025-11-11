@@ -6,12 +6,12 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from path.paths import PATH_UNIDADE
+from path.paths import PATH_SLZ, PATH_PRP, PATH_SJC
 
 # Variável global para rastrear o número de tentativas
 tentativas = 0
 limite_tentativas = 5
-unidades = ['0102', '0103', '0104'] # Número para pesquisar as unidades dentro do sistema(Seguir seu padrão.)
+unidades = ['0102', '0103', '0104']
 
 def normal_input(driver, seletor_container, seletor_field, text, tipo, log_queue):
     container = wait_for_element(driver, By.CSS_SELECTOR, seletor_container)
@@ -66,16 +66,39 @@ def shadow_input(driver, element, text, log_queue):
     print("Shadow DOM expandido.")
     log_queue.put("Shadow DOM expandido.")
     inserir = wait_for_click(shadow, By.CSS_SELECTOR, 'input')
-    sleep(1.5)
+    sleep(0.5)
 
     driver.execute_script("arguments[0].focus();", inserir)
     inserir.clear()
-    sleep(1.5)
+    sleep(0.5)
+    inserir.send_keys(Keys.CONTROL, 'a')
+    sleep(0.3)
+    inserir.send_keys(Keys.BACKSPACE)
+    ActionChains(driver).move_to_element(inserir).perform()
+    input.send_keys(text)
+
+    sleep(0.5)
+    
+    print("\nValor inserido.")
+    log_queue.put("\nValor inserido.")
+
+    return inserir
+
+def shadow_input_quant(driver, element, text, log_queue):
+    """Acessa um input dentro do Shadow DOM de um elemento."""
+    input = wait_for_element(driver, By.CSS_SELECTOR, element)
+    shadow = expand_shadow_element(driver, input)
+    print("Shadow DOM expandido.")
+    log_queue.put("Shadow DOM expandido.")
+    inserir = wait_for_click(shadow, By.CSS_SELECTOR, 'input')
+    sleep(0.75)
+
+    driver.execute_script("arguments[0].focus();", inserir)
 
     ActionChains(driver).move_to_element(inserir).perform()
     input.send_keys(text)
 
-    sleep(1)
+    sleep(0.5)
     
     print("\nValor inserido.")
     log_queue.put("\nValor inserido.")
@@ -109,7 +132,7 @@ def confirmar_valor(first_info, valor_desejado):
     if str(first_info) != str(valor_desejado):
         print(valor_desejado)
         print("Valor não inserido corretamente. Refazendo processo.")
-        sleep(3)
+        sleep(1.5)
         return False
     else:
         print("Valor confirmado. Continuando processo.")
@@ -145,7 +168,7 @@ def confirmando_wa_tgrid(driver, id, posicao, valor_desejado, funcao, tipo, *arg
                 if cnpj_numbers != cnpj:
                     print(cnpj)
                     print("Valor incorreto. Tentando novamente...")
-                    sleep(5)
+                    sleep(2)
                     funcao(driver, valor_desejado, *args, **kwargs)
                 else:
                     print("Valor confirmado. Seguindo com a lógica...")
@@ -163,7 +186,7 @@ def confirmando_wa_tgrid(driver, id, posicao, valor_desejado, funcao, tipo, *arg
                     else:
                         print(natureza)
                         print("Valor não inserido corretamente. Refazendo processo.")
-                        sleep(3)
+                        sleep(1)
                         funcao(driver, valor_desejado, *args, **kwargs)
                 elif tipo == "PAGTO":
                     pagto = valor_desejado.getPAGTO()
@@ -174,7 +197,7 @@ def confirmando_wa_tgrid(driver, id, posicao, valor_desejado, funcao, tipo, *arg
                     else:
                         print(valor_desejado)
                         print("Valor não inserido corretamente. Refazendo processo.")
-                        sleep(3)
+                        sleep(1)
                         funcao(driver, valor_desejado, *args, **kwargs)
                 else:
                     unidade = unidades[valor_desejado-1]
@@ -183,7 +206,7 @@ def confirmando_wa_tgrid(driver, id, posicao, valor_desejado, funcao, tipo, *arg
                         print("Valor confirmado. Continuando processo.")
                         tentativas = 0  # Resetar tentativas ao sucesso
                     else:
-                        sleep(3)
+                        sleep(1)
                         funcao(driver, valor_desejado, *args, **kwargs)
         else:
             print(f"Elemento na posição {posicao} não encontrado.")
@@ -221,7 +244,7 @@ def confirmando_wa_tmsselbr(driver, id, posicao, valor_desejado, funcao, log_que
                 log_queue.put(f"OS: {osKairos}")
                 print("Valor não inserido corretamente. Refazendo processo.")
                 log_queue.put("Valor não inserido corretamente. Refazendo processo.")
-                sleep(5)
+                sleep(2)
                 funcao(driver, valor_desejado, log_queue)
             else:
                 print("Valor confirmado. Continuando processo.")
@@ -236,7 +259,7 @@ def confirmando_wa_tmsselbr(driver, id, posicao, valor_desejado, funcao, log_que
         log_queue.put("\nErro: Índice fora do intervalo da lista!")
         print("Valor não inserido corretamente. Refazendo processo.")
         log_queue.put("Valor não inserido corretamente. Refazendo processo.")
-        sleep(5)
+        sleep(2)
         funcao(driver, valor_desejado, log_queue)
 
 def selecionar_elemento(driver, shadow_root, element, log_queue):
@@ -261,7 +284,7 @@ def selecionar_elemento(driver, shadow_root, element, log_queue):
 
             # Simular cliques no elemento
             target_element.click()
-            sleep(2)
+            sleep(1)
 
             # Simular a tecla "Enter" com JavaScript
             driver.execute_script("""
@@ -274,7 +297,7 @@ def selecionar_elemento(driver, shadow_root, element, log_queue):
                 });
                 arguments[0].dispatchEvent(event);
             """, target_element)
-            sleep(2)
+            sleep(1)
 
             print("Interação com o elemento concluída com sucesso.")
             log_queue.put("Interação com o elemento concluída com sucesso.")
@@ -344,7 +367,7 @@ def confirmando_wa_tcbrowse(driver, id, posicao, valor_desejado, log_queue):
             log_queue.put(f"Número da nota desejada: {valor_desejado}")
             print("Valor não inserido corretamente. Refazendo processo.")
             log_queue.put("Valor não inserido corretamente. Refazendo processo.")
-            sleep(5)
+            sleep(2)
             return False
         else:
             print("Valor confirmado. Continuando processo.")
@@ -394,7 +417,7 @@ def clicar_elemento_shadow_dom(driver, dialog_id, browse_id, target_selector, lo
         print("Clique realizado com sucesso!")
         log_queue.put("Clique realizado com sucesso!")
 
-        sleep(2)
+        sleep(1)
 
         print("\nExpandindo dialog para análise do número da nota.")
         log_queue.put("\nExpandindo dialog para análise do número da nota.")
@@ -403,7 +426,7 @@ def clicar_elemento_shadow_dom(driver, dialog_id, browse_id, target_selector, lo
         shadow_root = expand_shadow_element(driver, dialog_element)
 
         wa_dialog = wait_for_element(shadow_root, By.CSS_SELECTOR, target_selector)
-        sleep(2)
+        sleep(1)
         valor_atual = wa_dialog.text.strip()
         print(f"Valor atual do campo: {valor_atual}")
         log_queue.put(f"Valor atual do campo: {valor_atual}")
@@ -412,13 +435,26 @@ def clicar_elemento_shadow_dom(driver, dialog_id, browse_id, target_selector, lo
         if valor_atual == num_nota:
             print("O valor já está correto, nenhuma alteração necessária.")
             log_queue.put("O valor já está correto, nenhuma alteração necessária.")
-            sleep(2)
+            sleep(1)
         else:
+
+            driver.execute_script("""
+            var event = new KeyboardEvent('keydown', {
+                bubbles: true,
+                cancelable: true,
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13
+            });
+            arguments[0].dispatchEvent(event);
+            """, target_element)
+            sleep(1)
+
             print("Interação com o elemento concluída com sucesso.")
             if altera_nota(driver, target_selector, num_nota, log_queue):
                 print("Valor alterado com sucesso.")
                 log_queue.put("Valor alterado com sucesso.")
-                sleep(2)
+                sleep(1)
             else:
                 print("Falha ao alterar valor")
                 log_queue.put("Falha ao alterar valor")
@@ -499,7 +535,7 @@ def clicar_repetidamente(driver, log_queue, id_botao, id_objetivo):
         shadow_botao = expand_shadow_element(driver, botao)
         button(driver, shadow_botao, log_queue)  # Função que realmente clica no botão
         
-        sleep(3)
+        sleep(1)
         tentativas += 1
     try:
         # Espera pelo elemento esperado para confirmar que avançou
@@ -515,10 +551,14 @@ def clicar_repetidamente(driver, log_queue, id_botao, id_objetivo):
         return False
     
 def definir_nfe(unidade, ano, mes):
-    """Definição do caminho para a pasta a ser analisada e alterada. Considere aumentar o número de casos se necessário."""
+    """Definição do caminho para a pasta a ser analisada e alterada."""
     match unidade:
         case 1:
-            caminho_pdf = f"{PATH_UNIDADE}/Notas {ano}/{mes}/02 - Serviços"
+            caminho_pdf = f"{PATH_SLZ}/Notas {ano}/{mes}/02 - Serviços"
+        case 2:
+            caminho_pdf = f"{PATH_PRP}/Notas {ano}/{mes}/02 - Serviços"
+        case 3:
+            caminho_pdf = f"{PATH_SJC}/Notas {ano}/{mes}/02 - Serviços"
     
     return caminho_pdf
 
@@ -535,7 +575,7 @@ def usar_gatilho(driver, codigo, element, func, log_queue, *args):
         if tentar_alterar_valor(driver, campo_codigo, codigo, log_queue, element):
             print("Valor alterado com sucesso.")
             log_queue.put("Valor alterado com sucesso.")
-            sleep(3)
+            sleep(1)
             func(driver, *args, log_queue)
         else:
             print("Falha ao alterar valor")
@@ -561,7 +601,7 @@ def altera_nota(driver, element, valor_desejado, log_queue):
             shadow_root = expand_shadow_element(driver, dialog_element)
 
             wa_dialog = wait_for_element(shadow_root, By.CSS_SELECTOR, element)
-            sleep(2)
+            sleep(1)
             valor_atual = wa_dialog.text.strip()
             print(f"Valor atual do campo: {valor_atual}")
             log_queue.put(f"Valor atual do campo: {valor_atual}")
@@ -604,7 +644,7 @@ def altera_nota(driver, element, valor_desejado, log_queue):
             
             sleep(1)
 
-        campo_rotina = wait_for_element(driver, By.CSS_SELECTOR, 'wa-panel[id="COMP3053"] > wa-text-input[id="COMP3056"]')
+        campo_rotina = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
 
         valor_atual = acessar_valor(campo_rotina).strip()
         print(f"Valor atual do campo: {valor_atual}")
@@ -614,7 +654,7 @@ def altera_nota(driver, element, valor_desejado, log_queue):
             print("\nAlterando valor da nota.")
             log_queue.put("\nAlterando valor da nota.")
             
-            inserir = shadow_input(driver, 'wa-panel[id="COMP3053"] > wa-text-input[id="COMP3056"]', valor_desejado, log_queue)
+            inserir = shadow_input(driver, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', valor_desejado, log_queue)
 
             inserir.send_keys(Keys.RETURN)  # Press Enter to submit
             print("Enter pressionado.")
@@ -647,7 +687,34 @@ def tentar_alterar_valor(driver, field, valor_desejado, log_queue, element, max_
 
         shadow_input(driver, element, valor_desejado, log_queue)
 
-        sleep(2)  # Pequena espera para garantir que a alteração seja processada
+        sleep(1)  # Pequena espera para garantir que a alteração seja processada
+        tentativas += 1
+
+    print("Erro: Não foi possível confirmar a alteração após múltiplas tentativas.")
+    log_queue.put("Erro: Não foi possível confirmar a alteração após múltiplas tentativas.")
+    return False  # Falha: o valor não foi alterado corretamente
+
+def tentar_alterar_valor_quant(driver, field, valor_desejado, log_queue, element, max_tentativas=5):
+    """
+    Tenta alterar o valor do campo e verifica se a alteração foi bem-sucedida.
+    Retorna True se a alteração for confirmada, False se falhar após todas as tentativas.
+    """
+    tentativas = 0
+
+    while tentativas < max_tentativas:
+        valor_atual = str(acessar_valor(field)).strip()
+
+        if valor_atual == valor_desejado:
+            print(f"Valor alterado com sucesso: {valor_atual}")
+            log_queue.put(f"Valor alterado com sucesso: {valor_atual}")
+            return True  # Sucesso: o valor foi alterado corretamente
+
+        print(f"Tentativa {tentativas+1}/{max_tentativas}: Alterando valor...")
+        log_queue.put(f"Tentativa {tentativas+1}/{max_tentativas}: Alterando valor...")
+
+        shadow_input_quant(driver, element, valor_desejado, log_queue)
+
+        sleep(1)  # Pequena espera para garantir que a alteração seja processada
         tentativas += 1
 
     print("Erro: Não foi possível confirmar a alteração após múltiplas tentativas.")
@@ -673,6 +740,21 @@ def confirma_valor(driver, valor_atual, codigo, wa_dialog, log_queue, func, *arg
         print("\nValores diferentes.")
         log_queue.put("\nValores diferentes.")
         if tentar_alterar_valor(driver, wa_dialog, codigo, log_queue, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]'):
+            print("Valor alterado com sucesso.")
+            log_queue.put("Valor alterado com sucesso.")
+            func(driver, log_queue, *args, **kwargs)
+        else:
+            print("Falha ao alterar valor")
+            log_queue.put("Falha ao alterar valor")
+
+def confirma_valor_quant(driver, valor_atual, codigo, wa_dialog, log_queue, func, *args, **kwargs):
+    if valor_atual == codigo:
+        print("O valor já está correto, nenhuma alteração necessária.")
+        log_queue.put("O valor já está correto, nenhuma alteração necessária.")
+    else:
+        print("\nValores diferentes.")
+        log_queue.put("\nValores diferentes.")
+        if tentar_alterar_valor_quant(driver, wa_dialog, codigo, log_queue, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]'):
             print("Valor alterado com sucesso.")
             log_queue.put("Valor alterado com sucesso.")
             func(driver, log_queue, *args, **kwargs)

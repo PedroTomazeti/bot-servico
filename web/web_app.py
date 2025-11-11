@@ -4,6 +4,7 @@ import threading
 import sqlite3
 import re
 import json
+from datetime import datetime
 import traceback
 from selenium import webdriver
 from path.paths import paths
@@ -24,9 +25,10 @@ from selenium.common.exceptions import (
 )
 from processos.process_web import (
     confirmando_wa_tgrid, confirmando_wa_tmsselbr, expand_shadow_element, shadow_button, shadow_input, 
-    wait_for_element, click_element,selecionar_elemento, acessa_container, clicar_elemento_shadow_dom, 
-    verificar_situacao, clicar_repetidamente, definir_nfe, wait_for_click, normal_input,
-    button, acessar_valor, tentar_alterar_valor, usar_gatilho, confirma_valor, altera_nota
+    wait_for_element, click_element, confirmar_element, selecionar_elemento, acessa_container, compara_data,
+    clicar_elemento_shadow_dom, verificar_situacao, clicar_repetidamente, definir_nfe, wait_for_click, normal_input,
+    button, acessar_valor, tentar_alterar_valor, usar_gatilho, gatilho_erro, confirma_valor, altera_nota, shadow_input_quant,
+    confirma_valor_quant,
 )
 from utils.services import NotaServico
 
@@ -47,13 +49,10 @@ btn_filial_unidade = paths["btn_unidade"]
 btn_ok_cnpj = paths["btn_ok_cnpj"]
 menu_pagto = paths["pesquisa_pagto"]
 btn_ok_pagto_nat = paths["btn_ok_pagto_nat"]
-unidades = ['0102', '0103', '0104'] # Número que representa as unidades no sistema
+unidades = ['0102', '0103', '0104']
 
 # Função para carregar os dados do JSON
 def carregar_dados(json_path):
-    '''
-    Função para carregar os dados do JSON(Forma de pagamento e CNPJ.)
-    '''
     # Carregando os dados
     try:
         
@@ -71,9 +70,6 @@ def carregar_dados(json_path):
 
 # Função para salvar os dados no JSON
 def salvar_dados(dados, json_path):
-    '''
-    Função para salvar os dados no JSON
-    '''
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
@@ -104,8 +100,9 @@ def configurar_driver():
     """
     Configura e retorna o WebDriver para o Chrome.
     """
-# Configurações do navegador
+    # Configurações do navegador
     chrome_options = Options()
+    #chrome_options.add_argument("--headless=new")  # modo invisível
     chrome_options.add_argument("--ignore-certificate-errors")
     chrome_options.add_argument("--ignore-ssl-errors")
     chrome_options.add_argument("--disable-web-security")
@@ -119,19 +116,19 @@ def configurar_driver():
     
     return driver
 
-def abrir_site(driver, url):
+def abrir_site(driver, url, log_queue):
     """
     Inicializa o navegador, acessa o site especificado e realiza interações iniciais necessárias.
     """
     try:
         driver.get(url)
-        #log_queue.put(f"\nSite acessado: {url}")
+        log_queue.put(f"\nSite acessado: {url}")
         print(f"Site acessado: {url}")
         # Lógica para interagir com elementos na página
         return True
     except Exception as e:
         print(f"Erro ao abrir o site: {e}")
-        #log_queue.put(f"\nErro ao abrir o site: {e}")
+        log_queue.put(f"\nErro ao abrir o site: {e}")
         return False
 
 def fechar_site(driver):
@@ -144,33 +141,77 @@ def fechar_site(driver):
 
 def iniciar_driver(unidade, db_nome, mes_ano, log_queue, mes_selecionado):
     """
-    Função para iniciar e abrir o site.
+    Inicia o WebDriver, acessa o site e executa o processo principal.
+    Tenta novamente até 10 vezes em caso de erro.
     """
-    # Configura o WebDriver
-    driver = configurar_driver()
+    max_tentativas = 10
+    tentativa = 1
 
-    # URL do site
-    url = f"site/TOTVS/desejado"
-    
-    try:
-        # Abre o site
-        site_aberto = abrir_site(driver, url)
-        if not site_aberto:
-            raise Exception("\nFalha ao abrir o site.")
+    while tentativa <= max_tentativas:
+        print(f"\n🔄 Tentativa {tentativa}/{max_tentativas} de iniciar o processo...")
+        log_queue.put(f"\n🔄 Tentativa {tentativa}/{max_tentativas} de iniciar o processo...")
+        driver = None
 
-        # Continue com o fluxo principal
-        print("\nSite acessado com sucesso, prosseguindo com a lógica...")
-        log_queue.put("\nSite acessado com sucesso, prosseguindo com a lógica...")
-        main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecionado)
-    except Exception as e:
-        print(f"\nOcorreu um erro: {e}")
-        log_queue.put(f"\nOcorreu um erro: {e}")
-    
-    finally:
-        # Finaliza o WebDriver
-        driver.quit()
-        print("\nDriver finalizado.")
-        log_queue.put("Driver finalizado.\n")
+        try:
+            # Buscar notas com status "Encontrado"
+            notas_db = carregar_notas(db_nome, mes_ano)
+
+            if not notas_db:
+                log_queue.put("\nNenhuma nota com status 'Encontrado' encontrada.")
+                print("Nenhuma nota com status 'Encontrado' encontrada.")
+                return
+            
+            driver = configurar_driver()
+            url = "link"
+
+            site_aberto = abrir_site(driver, url, log_queue)
+            if not site_aberto:
+                raise Exception("Falha ao abrir o site.")
+
+            print("✅ Site acessado com sucesso, prosseguindo com a lógica...")
+            log_queue.put("\n✅ Site acessado com sucesso, prosseguindo com a lógica...")
+            sucesso = main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecionado)
+
+            if sucesso:
+                print("✅ Processamento concluído com sucesso.")
+                log_queue.put("✅ Processamento concluído com sucesso.")
+                if driver:
+                    try:
+                        driver.quit()
+                        print("🛑 Driver finalizado.")
+                        log_queue.put("🛑 Driver finalizado.")
+                    except Exception as e:
+                        print(f"⚠️ Erro ao finalizar driver: {e}")
+                        log_queue.put(f"⚠️ Erro ao finalizar driver: {e}")
+
+                return # Sai do loop com sucesso
+            else:
+                print(f"❌ Erro na tentativa {tentativa}: {e}")
+                log_queue.put(f"❌ Erro na tentativa {tentativa}: {e}")
+                tentativa += 1
+                if driver:
+                    try:
+                        driver.quit()
+                        print("🛑 Driver finalizado.")
+                        log_queue.put("🛑 Driver finalizado.")
+                    except Exception as e:
+                        print(f"⚠️ Erro ao finalizar driver: {e}")
+                        log_queue.put(f"⚠️ Erro ao finalizar driver: {e}")
+
+        except Exception as e:
+            print(f"❌ Erro na tentativa {tentativa}: {e}")
+            log_queue.put(f"❌ Erro na tentativa {tentativa}: {e}")
+            tentativa += 1
+            if driver:
+                try:
+                    driver.quit()
+                    print("🛑 Driver finalizado.")
+                    log_queue.put("🛑 Driver finalizado.")
+                except Exception as e:
+                    print(f"⚠️ Erro ao finalizar driver: {e}")
+                    log_queue.put(f"⚠️ Erro ao finalizar driver: {e}")
+
+            time.sleep(3)  # Pequena pausa antes de tentar novamente
 
 def monitor_connection_thread(driver, url, log_queue, stop_monitoring):
     """
@@ -192,7 +233,6 @@ def monitor_connection(driver, url, log_queue, stop_monitoring, max_attempts=5, 
         try:
             log_queue.put(f"[Monitor] Tentativa {attempt + 1} de {max_attempts} para acessar {url}...")
             print(f"[Monitor] Tentativa {attempt + 1} de {max_attempts} para acessar {url}...")
-            driver.get(url)
 
             # Aguarda a página carregar um elemento essencial
             wait_for_element(driver, By.CSS_SELECTOR, "wa-dialog.startParameters")
@@ -227,10 +267,40 @@ def process_shadow_dom(driver, log_queue):
     """
     Processa interações no Shadow DOM para clicar no botão OK e localizar outros elementos.
     """
-    print("Aguardando wa-dialog...")
+    print("Selecionando tipo de ambiente no servidor...")
+    log_queue.put("\nSelecionando tipo de ambiente no servidor...")
+
+    # Localiza o combobox dentro do Shadow DOM
+    wa_combo_box = wait_for_element(
+        driver, 
+        By.CSS_SELECTOR, 
+        'wa-dialog.startParameters > fieldset[id="fieldsetEnv"] > wa-combobox[id="selectEnv"]'
+    )
+    shadow_combo_box = expand_shadow_element(driver, wa_combo_box)
+    select_element = shadow_combo_box.find_element(By.CSS_SELECTOR, "select")
+
+    # Opção desejada
+    desired_value = "czls4f_prod"
+    desired_option = select_element.find_element(By.CSS_SELECTOR, f"option[value='{desired_value}']")
+
+    # Opção atual selecionada
+    current_option = select_element.find_element(By.CSS_SELECTOR, "option:checked")
+    current_value = current_option.get_attribute("value")
+
+    if current_value == desired_value:
+        print(f"\nAmbiente '{desired_value}' já está selecionado, não será alterado.")
+        log_queue.put(f"\nAmbiente '{desired_value}' já está selecionado, não será alterado.")
+    else:
+        desired_option.click()
+        print(f"\nAmbiente '{desired_value}' selecionado.")
+        log_queue.put(f"\nAmbiente '{desired_value}' selecionado.")
+
+    time.sleep(1)
+
+    print("\nAguardando wa-dialog...")
     log_queue.put("\nAguardando wa-dialog...")
     shadow_button(driver, "wa-dialog.startParameters", "wa-button[title='Botão confirmar']", log_queue)
-    
+
     time.sleep(3)
 
 def locate_and_access_iframe(driver, log_queue):
@@ -255,7 +325,7 @@ def locate_and_access_iframe(driver, log_queue):
     shadow_root_2 = expand_shadow_element(driver, wa_webview_1)
     print("Acessando o iframe dentro do shadowRoot...")
     log_queue.put("Acessando o iframe dentro do shadowRoot...")
-    iframe = wait_for_element(shadow_root_2, By.CSS_SELECTOR, 'iframe[src*="iframe.do.protheus"]')
+    iframe = wait_for_element(shadow_root_2, By.CSS_SELECTOR, 'iframe[src*="kairoscomercio136240.protheus.cloudtotvs.com.br"]')
 
     if iframe:
         print("Iframe localizado com sucesso.")
@@ -329,11 +399,11 @@ def abrir_menu_unidade(driver, unidade, data, log_queue):
 
     fechar_iframe(driver, log_queue)
 
-    time.sleep(10)
+    time.sleep(5)
 
 def rotina_venda(driver, log_queue):
     """
-    Função que pesquisa e acessa a rotina Pedidos de Venda.
+    Função que após apertar o botão de Favoritos acessa a rotina Pedidos de Venda.
     """
     print("Buscando pesquisa de rotina.")
     log_queue.put("\nBuscando pesquisa de rotina.")
@@ -436,7 +506,7 @@ def abrir_pedido(driver, unidade, log_queue):
 
     print("Acessando painel...")
     log_queue.put("Acessando painel...")
-    time.sleep(5)
+    time.sleep(2)
     print("Procurando botão OK...")
     log_queue.put("Procurando botão OK...")
     wait_for_element(driver, By.CSS_SELECTOR, 'wa-panel[id="COMP6001"] > wa-button[id="COMP6057"]')
@@ -444,7 +514,7 @@ def abrir_pedido(driver, unidade, log_queue):
     log_queue.put("Botão encontrado.")
 
     shadow_button(driver, 'wa-panel[id="COMP6001"] > wa-button[id="COMP6057"]', 'button', log_queue)
-    time.sleep(10)
+    time.sleep(5)
 
 def alterar_data(driver, data, log_queue):
     """
@@ -502,7 +572,7 @@ def busca_cnpj(driver, nota, log_queue):
     Busca apenas o container do campo de CNPJ no sistema
     """
     # Caminho do arquivo JSON
-    json_path = r"caminho\para\o\jason"
+    json_path = r"C:\Users\Pedro\Documents\BOT-SERVICES\path\cnpj.json"
     
     cnpj_input = nota.getCNPJ()
     cnpj_dict = carregar_dados(json_path)
@@ -545,7 +615,7 @@ def inserir_cnpj_pesquisa(driver, nota, log_queue):
     Após buscado e acessado o botão de pesquisa, inserir cnpj.
     """
     # Caminho do arquivo JSON
-    json_path = r"caminho\para\o\json"
+    json_path = r"C:\Users\Pedro\Documents\BOT-SERVICES\path\cnpj.json"
 
     cnpj_dict = carregar_dados(json_path)
 
@@ -556,7 +626,7 @@ def inserir_cnpj_pesquisa(driver, nota, log_queue):
     click_element(container_cnpj, (By.CSS_SELECTOR, 'button.button-image'))
     print("Botão de pesquisa clicado.")
     log_queue.put("Botão de pesquisa clicado.")
-    time.sleep(7)
+    time.sleep(3)
 
     field_cnpj = wait_for_element(driver, By.CSS_SELECTOR, input_pesquisa)
     print("Field CNPJ encontrado.")
@@ -567,14 +637,14 @@ def inserir_cnpj_pesquisa(driver, nota, log_queue):
     shadow_input(driver, input_pesquisa, cnpj, log_queue)
     print("CNPJ inserido com sucesso.")
     log_queue.put("CNPJ inserido com sucesso.")
-    time.sleep(5)
+    time.sleep(3)
 
     print("Pesquisando CNPJ...")
     log_queue.put("Pesquisando CNPJ...")
     pesquisar = wait_for_element(driver, By.CSS_SELECTOR, 'wa-button[id="COMP7534"]')
     shadow_pesquisar = expand_shadow_element(driver, pesquisar)
     button(driver, shadow_pesquisar, log_queue)
-    time.sleep(5)
+    time.sleep(3)
     
     confirmando_wa_tgrid(driver, "COMP7523", 15, nota, inserir_cnpj_pesquisa, "CNPJ", log_queue)
 
@@ -583,7 +653,7 @@ def inserir_cnpj_pesquisa(driver, nota, log_queue):
     print("Acessando shadow-button...")
     log_queue.put("Acessando shadow-button...")
     button(driver, shadow_ok, log_queue)
-    time.sleep(3)
+    time.sleep(1.5)
 
     valor_atual = acessar_valor(container_cnpj)
     print(f"Valor atual do campo: {valor_atual}")
@@ -620,7 +690,7 @@ def inserir_services(driver, nota, log_queue):
     option.click()
     print("Serviço selecionado.")
     log_queue.put("Serviço selecionado.")
-    time.sleep(3)
+    time.sleep(1)
 
     busca_forma_pagto(driver, nota, log_queue)
 
@@ -629,7 +699,7 @@ def busca_forma_pagto(driver, nota, log_queue):
     Busca apenas o container do campo de CNPJ no sistema
     """
     # Caminho do arquivo JSON
-    json_path = r"caminho\para\o\json"
+    json_path = r"C:\Users\Pedro\Documents\BOT-SERVICES\path\forma_pag.json"
     
     pagto_input = nota.getPAGTO()
     pagto_dict = carregar_dados(json_path)
@@ -660,7 +730,7 @@ def inserir_forma_pagto_pesquisa(driver, nota, log_queue):
     Confirmar forma de pagamento acessando a lupa.
     """
     # Caminho do arquivo JSON
-    json_path = r"caminho\para\o\json"
+    json_path = r"C:\Users\Pedro\Documents\BOT-SERVICES\path\forma_pag.json"
 
     print("Informando forma de pagamento...")
     log_queue.put("\nInformando forma de pagamento...")
@@ -671,21 +741,21 @@ def inserir_forma_pagto_pesquisa(driver, nota, log_queue):
     click_element(container_pagto, (By.CSS_SELECTOR, 'button.button-image'))
     print("Botão de pesquisa clicado.")
     log_queue.put("Botão de pesquisa clicado.")
-    time.sleep(5)
+    time.sleep(1)
 
     print("Procurando menu de pagamento...")
     log_queue.put("Procurando menu de pagamento...")
-    wait_for_element(driver, By.CSS_SELECTOR, menu_pagto)
+    pesquisa_pagto = wait_for_element(driver, By.CSS_SELECTOR, menu_pagto)
     print("Menu encontrado.")
     log_queue.put("Menu encontrado.")
     cond_pagto = nota.getPAGTO()
     shadow_input(driver, menu_pagto, cond_pagto, log_queue)
-    time.sleep(7)
+    time.sleep(1)
 
     button_pesq_pagto = wait_for_element(driver, By.CSS_SELECTOR, 'wa-button[id="COMP7534"]')
     shadow_pesq_pagto = expand_shadow_element(driver, button_pesq_pagto)
     button(driver, shadow_pesq_pagto, log_queue)
-    time.sleep(3)
+    time.sleep(1)
 
     confirmando_wa_tgrid(driver, "COMP7523", 29, nota, inserir_forma_pagto_pesquisa, "PAGTO", log_queue)
     
@@ -695,7 +765,7 @@ def inserir_forma_pagto_pesquisa(driver, nota, log_queue):
 
     print("Forma de pagamento adicionada.")
     log_queue.put("Forma de pagamento adicionada.")  
-    time.sleep(5)
+    time.sleep(1)
 
     valor_atual = acessar_valor(container_pagto)
     print(f"Valor atual do campo: {valor_atual}")
@@ -743,7 +813,7 @@ def inserir_iss(driver, nota, log_queue):
 
     print("Tributo selecionado.")
     log_queue.put("Tributo selecionado.")
-    time.sleep(3)
+    time.sleep(1)
     buscar_natureza(driver, nota, log_queue)
 
 def buscar_natureza(driver, nota, log_queue):
@@ -762,7 +832,7 @@ def buscar_natureza(driver, nota, log_queue):
     shadow_input(driver, 'wa-panel[id="COMP6009"] > wa-text-input[id="COMP6017"]', codigo, log_queue)
 
     campo_codigo.send_keys(Keys.RETURN)
-    time.sleep(2)
+    time.sleep(1)
 
     valor_atual = acessar_valor(campo_codigo)
     print(f"Valor atual do campo: {valor_atual}")
@@ -782,7 +852,7 @@ def buscar_natureza(driver, nota, log_queue):
         print("O valor já está correto, nenhuma alteração necessária.")
         log_queue.put("O valor já está correto, nenhuma alteração necessária.")
 
-    time.sleep(3)
+    time.sleep(1)
 
     abrir_vinculo_os(driver, nota, log_queue)
 
@@ -790,7 +860,7 @@ def abrir_vinculo_os(driver, nota, log_queue):
     """
     Abre menu do popup em outras ações para vincular OSs
     """
-    time.sleep(3)
+    time.sleep(1)
     print("Abrindo popup...")
     log_queue.put("\nAbrindo popup...")
     outras_button = wait_for_element(driver, By.CSS_SELECTOR, 'wa-button[id="COMP6171"]')
@@ -812,7 +882,7 @@ def abrir_vinculo_os(driver, nota, log_queue):
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", rotina_element)
     driver.execute_script("arguments[0].click();", rotina_element)
     print("Abrindo Vincular OSs...")
-    time.sleep(3)
+    time.sleep(1)
     vincular_os(driver, nota, log_queue)
 
 def vincular_os(driver, nota, log_queue):
@@ -824,7 +894,7 @@ def vincular_os(driver, nota, log_queue):
         os_input = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7502"]')
         shadow = expand_shadow_element(driver, os_input)
         inserir = wait_for_click(shadow, By.CSS_SELECTOR, 'input')
-        time.sleep(2)
+        time.sleep(1)
     
         print("Ativando foco no input.")
         log_queue.put("\nAtivando foco no input.")
@@ -837,18 +907,18 @@ def vincular_os(driver, nota, log_queue):
         print("Tecla BACKSPACE apertada.")
         log_queue.put("Tecla BACKSPACE apertada.")
         os_input.send_keys(Keys.BACKSPACE)  # Clear any existing text in the input field
-        time.sleep(2)
+        time.sleep(1)
         
         for char in os:
             os_input.send_keys(char)
-            time.sleep(0.3)
+            time.sleep(0.2)
     
-        time.sleep(2)
+        time.sleep(1)
     
         inserir.send_keys(Keys.RETURN)  # Press Enter to submit
         print("Primeiro enter pressionado.")
         log_queue.put("Primeiro enter pressionado.")
-        time.sleep(2)
+        time.sleep(1)
     
         confirmando_wa_tmsselbr(driver, "COMP7504", 35, nota, vincular_os, log_queue, os)
 
@@ -857,7 +927,7 @@ def vincular_os(driver, nota, log_queue):
         enter_sec.send_keys(Keys.RETURN)  # Press Enter to submit
         print("Segundo enter pressionado.")
         log_queue.put("Segundo enter pressionado.")
-        time.sleep(3)
+        time.sleep(1)
     
     print("Buscando botão de confirmar...")
     log_queue.put("Buscando botão de confirmar...")
@@ -866,7 +936,7 @@ def vincular_os(driver, nota, log_queue):
     log_queue.put("Encontrado.\nExpandindo shadow element...")
     shadow_os = expand_shadow_element(driver, confirmar_os)
     button(driver, shadow_os, log_queue)
-    time.sleep(5)
+    time.sleep(1)
     
     corpo_nota(driver, nota, log_queue)
 
@@ -896,7 +966,7 @@ def selecionar_produto(driver, nota, log_queue):
             print(f"Elemento localizado: {target_element}")
             log_queue.put(f"Elemento localizado: {target_element}")
             target_element.click()
-            time.sleep(2)
+            time.sleep(1)
             print("Seleção concluída.")
             log_queue.put("Seleção concluída.")
             selecionar_elemento(driver, shadow_root, 'div.horizontal-scroll > table > tbody > tr#\\30 > td#\\31 > div', log_queue)
@@ -908,7 +978,7 @@ def selecionar_produto(driver, nota, log_queue):
         print(f'Ocorreu um erro: {e}')
         log_queue.put(f'Ocorreu um erro: {e}')
 
-def inserir_produto(driver, log_queue, nota, codigo="CODIGO CADASTRADO"):
+def inserir_produto(driver, log_queue, nota, codigo="3500.0980"):
     """
     Após a busca ser concluída digita o código e a tecla enter é apertada para confirmar a escolha.
     """
@@ -918,7 +988,7 @@ def inserir_produto(driver, log_queue, nota, codigo="CODIGO CADASTRADO"):
     wa_dialog = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
     print("Inserindo código do produto...")
     log_queue.put("Inserindo código do produto...")
-    time.sleep(2)
+    time.sleep(1)
 
     inserir = shadow_input(driver,'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', codigo, log_queue)
 
@@ -932,7 +1002,7 @@ def inserir_produto(driver, log_queue, nota, codigo="CODIGO CADASTRADO"):
     inserir.send_keys(Keys.RETURN)  # Press Enter to submit
     print("Primeiro enter pressionado.")
     log_queue.put("Primeiro enter pressionado.")
-    time.sleep(3)
+    time.sleep(1)
 
     selecionar_quantidade(driver, log_queue, nota)
 
@@ -953,9 +1023,9 @@ def inserir_quantidade(driver, log_queue, nota, quant="1"):
     print('Elemento encontrado e tecla "Enter" enviada com sucesso!')
     log_queue.put('\nElemento encontrado e tecla "Enter" enviada com sucesso!')
     wa_dialog = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
-    time.sleep(2)
+    time.sleep(1)
 
-    inserir = shadow_input(driver,'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', quant, log_queue)
+    inserir = shadow_input_quant(driver, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', quant, log_queue)
 
     valor_atual = acessar_valor(wa_dialog)
     print(f"Valor atual do campo: {valor_atual}")
@@ -964,16 +1034,16 @@ def inserir_quantidade(driver, log_queue, nota, quant="1"):
     valor_atual = str(float(valor_atual))  # Converte para float e depois de volta para string
     quant = str(float(quant))  # Faz o mesmo para 'quant'
 
-    confirma_valor(driver, valor_atual, quant, wa_dialog, log_queue, selecionar_preco, nota)
+    confirma_valor_quant(driver, valor_atual, quant, wa_dialog, log_queue, selecionar_preco, nota)
 
     inserir.send_keys(Keys.RETURN)  # Press Enter to submit
     print("Primeiro enter pressionado.")
     log_queue.put("Primeiro enter pressionado.")
-    time.sleep(3)
+    time.sleep(1)
         
     print("Serviço quantificado.")
     log_queue.put("Serviço quantificado.")
-    time.sleep(2)
+    time.sleep(1)
     selecionar_preco(driver, log_queue, nota)
 
 def selecionar_preco(driver, log_queue, nota):
@@ -1001,9 +1071,9 @@ def inserir_preco(driver, log_queue, nota):
     print("Inserindo preço...")
     log_queue.put("Inserindo preço...")
     wa_dialog = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
-    time.sleep(2)
+    time.sleep(1)
 
-    inserir = shadow_input(driver,'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', preco_format, log_queue)
+    inserir = shadow_input_quant(driver,'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', preco_format, log_queue)
 
     valor_atual = acessar_valor(wa_dialog)
     print(f"Valor atual do campo: {valor_atual}")
@@ -1015,13 +1085,13 @@ def inserir_preco(driver, log_queue, nota):
     print(f"Valor atual formatado: {valor_atual}")
     log_queue.put(f"Valor atual formatado: {valor_atual}")
 
-    confirma_valor(driver, valor_atual_formatado, preco_format, wa_dialog, log_queue, selecionar_tes)
+    confirma_valor_quant(driver, valor_atual_formatado, preco_format, wa_dialog, log_queue, selecionar_tes)
 
     inserir.send_keys(Keys.RETURN)  # Press Enter to submit
     print("Preço digitado.")
     log_queue.put("Preço digitado.")
         
-    time.sleep(3)
+    time.sleep(1)
     selecionar_tes(driver, log_queue)
 
 def selecionar_tes(driver, log_queue):
@@ -1035,21 +1105,18 @@ def selecionar_tes(driver, log_queue):
     acessa_container(driver, element, seletor, inserir_tes, log_queue)
 
 def inserir_tes(driver, log_queue):
-    '''
-    Inserindo código de saída para serviços. Mude se necessário em shadow_input.
-    '''
     try:
         print("Inserindo TES...")
         log_queue.put("\nInserindo TES...")
 
-        wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
-        time.sleep(2)
+        wa_dialog = wait_for_element(driver, By.CSS_SELECTOR, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]')
+        time.sleep(1)
 
         shadow_input(driver, 'wa-dialog[id="COMP7500"] > wa-text-input[id="COMP7501"]', "568", log_queue)
 
         print("TES inserida com sucesso.")
         log_queue.put("TES inserida com sucesso.")
-        time.sleep(4)
+        time.sleep(1)
 
     except Exception as e:
         print(f"Erro ao inserir TES: {e}")
@@ -1068,7 +1135,7 @@ def encerrar_pedido(driver, log_queue):
         button(driver, shadow_save, log_queue)
         print("Nota salva com sucesso.")
         log_queue.put("Nota salva com sucesso.")
-        time.sleep(7)
+        time.sleep(2.5)
 
         print("Acessando painel de cancelar...")
         # Verificar painel de retorno
@@ -1082,7 +1149,7 @@ def encerrar_pedido(driver, log_queue):
             button(driver, shadow_cancel, log_queue)
             print("Nota encerrada.")
             log_queue.put("Nota encerrada.")
-            time.sleep(7)
+            time.sleep(1)
             return True
         else:
             print("Painel de retorno não encontrado.")
@@ -1110,10 +1177,10 @@ def preparar_doc(driver, log_queue, num_nota):
     print("Menu aberto com sucesso.")
     log_queue.put("Menu aberto com sucesso.")
     
-    time.sleep(5)
+    time.sleep(1)
     clicar_repetidamente(driver, log_queue, 'wa-panel[id="COMP6004"] > wa-button[id="COMP6014"]', 'wa-panel[id="COMP6004"] > wa-button[id="COMP6015"]')
 
-    time.sleep(3)
+    time.sleep(1)
     
     print("Vinculando nota...")
     log_queue.put("\nVinculando nota...")
@@ -1123,9 +1190,9 @@ def preparar_doc(driver, log_queue, num_nota):
         'div.horizontal-scroll > table > tbody > tr#\\33 > td#\\31 > div', 
         log_queue, num_nota)
 
-    time.sleep(5)
+    time.sleep(1)
     shadow_button(driver, 'wa-dialog[id="COMP6000"] > wa-button[id="COMP6005"]', 'button', log_queue)
-    time.sleep(3)
+    time.sleep(1)
     shadow_button(driver, 'wa-panel[id="COMP6066"] > wa-button[id="COMP6068"]', 'button', log_queue)
 
 def renomeia_pdf(numero_nota, pasta_nfe, log_queue, db_nome, mes_ano, unidade):
@@ -1235,7 +1302,7 @@ def inicializar_sistema(driver, unidade, data_inicial, log_queue):
     """ Realiza login e inicializações no sistema. """
     process_shadow_dom(driver, log_queue)
     locate_and_access_iframe(driver, log_queue)
-    perform_login(driver, "USER", "SENHA", log_queue)
+    perform_login(driver, "user", "password", log_queue)
     abrir_menu_unidade(driver, unidade, data_inicial, log_queue)
 
 def processar_notas(driver, notas, data_anterior, unidade, log_queue, mes_ano, db_nome, mes_selecionado):
@@ -1248,13 +1315,13 @@ def processar_notas(driver, notas, data_anterior, unidade, log_queue, mes_ano, d
         if nota.getDATA() != data_anterior:
             print("Mudança na data encontrada.")
             log_queue.put("\nMudança na data encontrada.")
-            time.sleep(5)
+            time.sleep(1)
             alterar_data(driver, nota.getDATA(), log_queue)
         
         apertar_incluir(driver, log_queue)
         abrir_pedido(driver, unidade, log_queue)
 
-        time.sleep(5)
+        time.sleep(1)
 
         codigo = busca_cnpj(driver, nota, log_queue)
         
@@ -1263,11 +1330,7 @@ def processar_notas(driver, notas, data_anterior, unidade, log_queue, mes_ano, d
         else:
             inserir_cnpj(driver, codigo, nota, log_queue)
         
-        try:
-            sucesso = encerrar_pedido(driver, log_queue)
-        except Exception as e:
-            print("Erro ao encerrar pedido:")
-            traceback.print_exc()
+        sucesso = encerrar_pedido(driver, log_queue)
 
         if sucesso:
             status = verificar_situacao(driver, log_queue)
@@ -1276,7 +1339,7 @@ def processar_notas(driver, notas, data_anterior, unidade, log_queue, mes_ano, d
                 caminho_nfe = definir_nfe(unidade, mes_ano.split("_")[1].strip(), mes_selecionado)
                 renomeia_pdf(nota.getNumNOTA(), caminho_nfe, log_queue, db_nome, mes_ano, unidade)
                 data_anterior = nota.getDATA()
-                time.sleep(7)
+                time.sleep(3)
             else:
                 log_queue.put("\nNota não foi salva corretamente. Tente de novo...")
 
@@ -1306,11 +1369,6 @@ def main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecion
 
             # Buscar notas com status "Encontrado"
             notas_db = carregar_notas(db_nome, mes_ano)
-
-            if not notas_db:
-                log_queue.put("\nNenhuma nota com status 'Encontrado' encontrada.")
-                print("Nenhuma nota com status 'Encontrado' encontrada.")
-                return
 
             # Lista de notas a processar
             notas = []
@@ -1348,7 +1406,7 @@ def main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecion
             print("Aberto.")
             log_queue.put("Aberto.")
 
-            time.sleep(7)
+            time.sleep(3)
 
             # Processar notas
             processar_notas(driver, notas, data_inicial, unidade, log_queue, mes_ano, db_nome, mes_selecionado)
@@ -1356,8 +1414,10 @@ def main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecion
             print("Processamento de todas as notas concluído.")
             log_queue.put("\nProcessamento de todas as notas concluído.")
 
+            return True
         else:
             print("Conexão não estabelecida. Verifique a lógica de monitoramento.")
+            log_queue.put("\nConexão não estabelecida. Verifique a lógica de monitoramento.")
 
     except (NoSuchElementException, ElementNotInteractableException, TimeoutException, JavascriptException, WebDriverException) as e:
         msg = f"Erro Selenium: {e}"
@@ -1365,15 +1425,18 @@ def main_process(driver, url, db_nome, unidade, mes_ano, log_queue, mes_selecion
         print(msg)
         print(traceback.format_exc())
 
+        return False
+
     except Exception as e:
         msg = f"Erro no processo principal: {e}"
         log_queue.put(msg)
         print(msg)
         print(traceback.format_exc())
 
+        return False
+
     finally:
         stop_monitoring.set()
         monitor_thread.join()
         print("Finalizando driver e monitoramento.")
         log_queue.put("Finalizando driver e monitoramento.")
-        fechar_site(driver)
